@@ -588,22 +588,53 @@ void set_posestamp(T & out)
 }
 
 void publish_odometry(const ros::Publisher &pubOdomAftMapped)
-{   
-    // Covariance23 메시지 생성
+{
+    // 결과 추출용 메시지 생성
     fast_lio_modified::CustomOdometry odomAftMapped;
 
-    // Odometry 메시지 설정
+    // OHeader 설정
     odomAftMapped.header.frame_id = "camera_init";
     odomAftMapped.child_frame_id = "body";
     odomAftMapped.header.stamp = ros::Time().fromSec(lidar_end_time);
+
+    // Pose 추출
     set_posestamp(odomAftMapped.pose);
+
+    // 23x1 State 추출
+    int idx = 0;
+    odomAftMapped.state_vector[idx++] = state_point.pos[0];
+    odomAftMapped.state_vector[idx++] = state_point.pos[1];
+    odomAftMapped.state_vector[idx++] = state_point.pos[2];
+    odomAftMapped.state_vector[idx++] = state_point.rot.vec()[0];
+    odomAftMapped.state_vector[idx++] = state_point.rot.vec()[1];
+    odomAftMapped.state_vector[idx++] = state_point.rot.vec()[2];
+    odomAftMapped.state_vector[idx++] = state_point.offset_R_L_I.vec()[0];
+    odomAftMapped.state_vector[idx++] = state_point.offset_R_L_I.vec()[1];
+    odomAftMapped.state_vector[idx++] = state_point.offset_R_L_I.vec()[2];
+    odomAftMapped.state_vector[idx++] = state_point.offset_T_L_I[0];
+    odomAftMapped.state_vector[idx++] = state_point.offset_T_L_I[1];
+    odomAftMapped.state_vector[idx++] = state_point.offset_T_L_I[2];
+    odomAftMapped.state_vector[idx++] = state_point.vel[0];
+    odomAftMapped.state_vector[idx++] = state_point.vel[1];
+    odomAftMapped.state_vector[idx++] = state_point.vel[2];
+    odomAftMapped.state_vector[idx++] = state_point.bg[0];
+    odomAftMapped.state_vector[idx++] = state_point.bg[1];
+    odomAftMapped.state_vector[idx++] = state_point.bg[2];
+    odomAftMapped.state_vector[idx++] = state_point.ba[0];
+    odomAftMapped.state_vector[idx++] = state_point.ba[1];
+    odomAftMapped.state_vector[idx++] = state_point.ba[2];
+    odomAftMapped.state_vector[idx++] = state_point.grav[0];
+    odomAftMapped.state_vector[idx++] = state_point.grav[1];
+
+    // 23 x 23 Covariance 추출
     auto P = kf.get_P();
     for (int i = 0; i < 529; i++)
     {
         odomAftMapped.covariance[i] = P(i); // 2차원 -> 1차원 변환
     }
-    pubOdomAftMapped.publish(odomAftMapped);
 
+    // Publish
+    pubOdomAftMapped.publish(odomAftMapped);
 
     // Transform Broadcast 설정
     static tf::TransformBroadcaster br;
@@ -612,8 +643,7 @@ void publish_odometry(const ros::Publisher &pubOdomAftMapped)
     transform.setOrigin(tf::Vector3(
         odomAftMapped.pose.pose.position.x,
         odomAftMapped.pose.pose.position.y,
-        odomAftMapped.pose.pose.position.z
-    ));
+        odomAftMapped.pose.pose.position.z));
     q.setW(odomAftMapped.pose.pose.orientation.w);
     q.setX(odomAftMapped.pose.pose.orientation.x);
     q.setY(odomAftMapped.pose.pose.orientation.y);
