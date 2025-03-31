@@ -592,14 +592,6 @@ void publish_odometry(const ros::Publisher &pubOdomAftMapped)
     // 결과 추출용 메시지 생성
     fast_lio_modified::CustomOdometry odomAftMapped;
 
-    // OHeader 설정
-    odomAftMapped.header.frame_id = "camera_init";
-    odomAftMapped.child_frame_id = "body";
-    odomAftMapped.header.stamp = ros::Time().fromSec(lidar_end_time);
-
-    // Pose 추출
-    set_posestamp(odomAftMapped.pose);
-
     // 23x1 State 추출
     int idx = 0;
     odomAftMapped.state_vector[idx++] = state_point.pos[0];
@@ -636,22 +628,6 @@ void publish_odometry(const ros::Publisher &pubOdomAftMapped)
     // Publish
     pubOdomAftMapped.publish(odomAftMapped);
 
-    // Transform Broadcast 설정
-    static tf::TransformBroadcaster br;
-    tf::Transform transform;
-    tf::Quaternion q;
-    transform.setOrigin(tf::Vector3(
-        odomAftMapped.pose.pose.position.x,
-        odomAftMapped.pose.pose.position.y,
-        odomAftMapped.pose.pose.position.z));
-    q.setW(odomAftMapped.pose.pose.orientation.w);
-    q.setX(odomAftMapped.pose.pose.orientation.x);
-    q.setY(odomAftMapped.pose.pose.orientation.y);
-    q.setZ(odomAftMapped.pose.pose.orientation.z);
-    transform.setRotation(q);
-
-    // Transform 메시지 전송
-    br.sendTransform(tf::StampedTransform(transform, odomAftMapped.header.stamp, "camera_init", "body"));
 }
 
 void publish_path(const ros::Publisher pubPath)
@@ -897,17 +873,22 @@ int main(int argc, char** argv)
     signal(SIGINT, SigHandle);
     ros::Rate rate(5000);
     bool status = ros::ok();
+    int scanCount = 0;
     while (status)
     {
         if (flg_exit) break;
         ros::spinOnce();
         if(sync_packages(Measures)) 
-        {
+        {   
+            scanCount++;
+            printf("Scan : %d \n",scanCount);
             if (flg_first_scan)
             {
                 first_lidar_time = Measures.lidar_beg_time;
                 p_imu->first_lidar_time = first_lidar_time;
                 flg_first_scan = false;
+                ROS_WARN("First Scan, skip this scan!\n");
+                publish_odometry(pubOdomAftMapped);
                 continue;
             }
 
@@ -923,10 +904,11 @@ int main(int argc, char** argv)
             p_imu->Process(Measures, kf, feats_undistort);
             state_point = kf.get_x();
             pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
-
+             
             if (feats_undistort->empty() || (feats_undistort == NULL))
             {
-                ROS_WARN("No point, skip this scan!\n");
+                ROS_WARN("1 : No point, skip this scan!\n");
+                publish_odometry(pubOdomAftMapped);
                 continue;
             }
 
@@ -953,6 +935,8 @@ int main(int argc, char** argv)
                     }
                     ikdtree.Build(feats_down_world->points);
                 }
+                ROS_WARN("IKD-Tree Init, skip this scan!\n");
+                publish_odometry(pubOdomAftMapped);
                 continue;
             }
             int featsFromMapNum = ikdtree.validnum();
@@ -963,7 +947,8 @@ int main(int argc, char** argv)
             /*** ICP and iterated Kalman filter update ***/
             if (feats_down_size < 5)
             {
-                ROS_WARN("No point, skip this scan!\n");
+                ROS_WARN("2 : No point, skip this scan!\n");
+                publish_odometry(pubOdomAftMapped);
                 continue;
             }
             
