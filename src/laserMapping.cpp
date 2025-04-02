@@ -587,12 +587,45 @@ void set_posestamp(T & out)
     
 }
 
-void publish_odometry(const ros::Publisher &pubOdomAftMapped)
+void publish_odometry(const ros::Publisher & pubOdomAftMapped)
+{
+    odomAftMapped.header.frame_id = "camera_init";
+    odomAftMapped.child_frame_id = "body";
+    odomAftMapped.header.stamp = ros::Time().fromSec(lidar_end_time);// ros::Time().fromSec(lidar_end_time);
+    set_posestamp(odomAftMapped.pose);
+    pubOdomAftMapped.publish(odomAftMapped);
+    auto P = kf.get_P();
+    for (int i = 0; i < 6; i ++)
+    {
+        int k = i < 3 ? i + 3 : i - 3;
+        odomAftMapped.pose.covariance[i*6 + 0] = P(k, 3);
+        odomAftMapped.pose.covariance[i*6 + 1] = P(k, 4);
+        odomAftMapped.pose.covariance[i*6 + 2] = P(k, 5);
+        odomAftMapped.pose.covariance[i*6 + 3] = P(k, 0);
+        odomAftMapped.pose.covariance[i*6 + 4] = P(k, 1);
+        odomAftMapped.pose.covariance[i*6 + 5] = P(k, 2);
+    }
+
+    static tf::TransformBroadcaster br;
+    tf::Transform                   transform;
+    tf::Quaternion                  q;
+    transform.setOrigin(tf::Vector3(odomAftMapped.pose.pose.position.x, \
+                                    odomAftMapped.pose.pose.position.y, \
+                                    odomAftMapped.pose.pose.position.z));
+    q.setW(odomAftMapped.pose.pose.orientation.w);
+    q.setX(odomAftMapped.pose.pose.orientation.x);
+    q.setY(odomAftMapped.pose.pose.orientation.y);
+    q.setZ(odomAftMapped.pose.pose.orientation.z);
+    transform.setRotation( q );
+    br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "camera_init", "body" ) );
+}
+
+void publish_custom_odometry(const ros::Publisher &pubCustomOdomAftMapped)
 {
     // 결과 추출용 메시지 생성
     fast_lio_modified::CustomOdometry odomAftMapped;
 
-    // 23x1 State 추출
+    // 24 x 1 State 추출
     int idx = 0;
     odomAftMapped.state_vector[idx++] = state_point.pos[0];
     odomAftMapped.state_vector[idx++] = state_point.pos[1];
@@ -617,8 +650,9 @@ void publish_odometry(const ros::Publisher &pubOdomAftMapped)
     odomAftMapped.state_vector[idx++] = state_point.ba[2];
     odomAftMapped.state_vector[idx++] = state_point.grav[0];
     odomAftMapped.state_vector[idx++] = state_point.grav[1];
+    odomAftMapped.state_vector[idx++] = state_point.grav[2];
 
-    // 23 x 23 Covariance 추출
+    // 23 x 23 Covariance 추출 (중력 S2)
     auto P = kf.get_P();
     for (int i = 0; i < 529; i++)
     {
@@ -626,7 +660,7 @@ void publish_odometry(const ros::Publisher &pubOdomAftMapped)
     }
 
     // Publish
-    pubOdomAftMapped.publish(odomAftMapped);
+    pubCustomOdomAftMapped.publish(odomAftMapped);
 
 }
 
@@ -865,8 +899,10 @@ int main(int argc, char** argv)
             ("/cloud_effected", 100000);
     ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>
             ("/Laser_map", 100000);
-    ros::Publisher pubOdomAftMapped = nh.advertise<fast_lio_modified::CustomOdometry> 
+    ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry> 
             ("/Odometry", 100000);
+    ros::Publisher pubCustomOdomAftMapped = nh.advertise<fast_lio_modified::CustomOdometry> 
+            ("/Custom_Odometry", 100000);
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 100000);
 //------------------------------------------------------------------------------------------------------
@@ -888,7 +924,7 @@ int main(int argc, char** argv)
                 p_imu->first_lidar_time = first_lidar_time;
                 flg_first_scan = false;
                 ROS_WARN("First Scan, skip this scan!\n");
-                publish_odometry(pubOdomAftMapped);
+                publish_custom_odometry(pubCustomOdomAftMapped);
                 continue;
             }
 
@@ -908,7 +944,7 @@ int main(int argc, char** argv)
             if (feats_undistort->empty() || (feats_undistort == NULL))
             {
                 ROS_WARN("1 : No point, skip this scan!\n");
-                publish_odometry(pubOdomAftMapped);
+                publish_custom_odometry(pubCustomOdomAftMapped);
                 continue;
             }
 
@@ -936,7 +972,7 @@ int main(int argc, char** argv)
                     ikdtree.Build(feats_down_world->points);
                 }
                 ROS_WARN("IKD-Tree Init, skip this scan!\n");
-                publish_odometry(pubOdomAftMapped);
+                publish_custom_odometry(pubCustomOdomAftMapped);
                 continue;
             }
             int featsFromMapNum = ikdtree.validnum();
@@ -948,7 +984,7 @@ int main(int argc, char** argv)
             if (feats_down_size < 5)
             {
                 ROS_WARN("2 : No point, skip this scan!\n");
-                publish_odometry(pubOdomAftMapped);
+                publish_custom_odometry(pubCustomOdomAftMapped);
                 continue;
             }
             
@@ -989,6 +1025,7 @@ int main(int argc, char** argv)
             double t_update_end = omp_get_wtime();
 
             /******* Publish odometry *******/
+            publish_custom_odometry(pubCustomOdomAftMapped);
             publish_odometry(pubOdomAftMapped);
 
             /*** add the feature points to map kdtree ***/
