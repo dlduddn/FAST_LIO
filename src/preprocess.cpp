@@ -283,7 +283,6 @@ void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
 
 void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
 {
-    printf("LiDAR Input \n");
     pl_surf.clear();
     pl_corn.clear();
     pl_full.clear();

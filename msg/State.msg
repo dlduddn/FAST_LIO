@@ -1,0 +1,9 @@
+# State.msg
+float64[3] pos
+float64[4] rot
+float64[3] vel
+float64[4] offset_R_L_I
+float64[3] offset_T_L_I
+float64[3] bg
+float64[3] ba
+float64[3] grav

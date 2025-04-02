@@ -59,7 +59,7 @@
 #include <livox_ros_driver/CustomMsg.h>
 #include "preprocess.h"
 #include <ikd-Tree/ikd_Tree.h>
-#include <fast_lio_modified/CustomOdometry.h>
+#include <fast_lio_modified/Estimate.h>
 
 #define INIT_TIME           (0.1)
 #define LASER_POINT_COV     (0.001)
@@ -620,48 +620,30 @@ void publish_odometry(const ros::Publisher & pubOdomAftMapped)
     br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "camera_init", "body" ) );
 }
 
-void publish_custom_odometry(const ros::Publisher &pubCustomOdomAftMapped)
+void publish_estimate(const ros::Publisher &pubEstimate)
 {
     // 결과 추출용 메시지 생성
-    fast_lio_modified::CustomOdometry odomAftMapped;
+    fast_lio_modified::Estimate Est;
 
     // 24 x 1 State 추출
-    int idx = 0;
-    odomAftMapped.state_vector[idx++] = state_point.pos[0];
-    odomAftMapped.state_vector[idx++] = state_point.pos[1];
-    odomAftMapped.state_vector[idx++] = state_point.pos[2];
-    odomAftMapped.state_vector[idx++] = state_point.rot.vec()[0];
-    odomAftMapped.state_vector[idx++] = state_point.rot.vec()[1];
-    odomAftMapped.state_vector[idx++] = state_point.rot.vec()[2];
-    odomAftMapped.state_vector[idx++] = state_point.offset_R_L_I.vec()[0];
-    odomAftMapped.state_vector[idx++] = state_point.offset_R_L_I.vec()[1];
-    odomAftMapped.state_vector[idx++] = state_point.offset_R_L_I.vec()[2];
-    odomAftMapped.state_vector[idx++] = state_point.offset_T_L_I[0];
-    odomAftMapped.state_vector[idx++] = state_point.offset_T_L_I[1];
-    odomAftMapped.state_vector[idx++] = state_point.offset_T_L_I[2];
-    odomAftMapped.state_vector[idx++] = state_point.vel[0];
-    odomAftMapped.state_vector[idx++] = state_point.vel[1];
-    odomAftMapped.state_vector[idx++] = state_point.vel[2];
-    odomAftMapped.state_vector[idx++] = state_point.bg[0];
-    odomAftMapped.state_vector[idx++] = state_point.bg[1];
-    odomAftMapped.state_vector[idx++] = state_point.bg[2];
-    odomAftMapped.state_vector[idx++] = state_point.ba[0];
-    odomAftMapped.state_vector[idx++] = state_point.ba[1];
-    odomAftMapped.state_vector[idx++] = state_point.ba[2];
-    odomAftMapped.state_vector[idx++] = state_point.grav[0];
-    odomAftMapped.state_vector[idx++] = state_point.grav[1];
-    odomAftMapped.state_vector[idx++] = state_point.grav[2];
+    for (int i = 0; i < 3; i++) Est.state_vector.pos[i] = state_point.pos[i];
+    for (int i = 0; i < 4; i++) Est.state_vector.rot[i] = state_point.rot.coeffs()[i];
+    for (int i = 0; i < 3; i++) Est.state_vector.vel[i] = state_point.vel[i];
+    for (int i = 0; i < 4; i++) Est.state_vector.offset_R_L_I[i] = state_point.offset_R_L_I.coeffs()[i];
+    for (int i = 0; i < 3; i++) Est.state_vector.offset_T_L_I[i] = state_point.offset_T_L_I[i];
+    for (int i = 0; i < 3; i++) Est.state_vector.bg[i] = state_point.bg[i];
+    for (int i = 0; i < 3; i++) Est.state_vector.ba[i] = state_point.ba[i];
+    for (int i = 0; i < 3; i++) Est.state_vector.grav[i] = state_point.grav[i];    
 
     // 23 x 23 Covariance 추출 (중력 S2)
     auto P = kf.get_P();
     for (int i = 0; i < 529; i++)
     {
-        odomAftMapped.covariance[i] = P(i); // 2차원 -> 1차원 변환
+        Est.covariance[i] = P(i); // 2차원 -> 1차원 변환
     }
 
     // Publish
-    pubCustomOdomAftMapped.publish(odomAftMapped);
-
+    pubEstimate.publish(Est);
 }
 
 void publish_path(const ros::Publisher pubPath)
@@ -901,8 +883,8 @@ int main(int argc, char** argv)
             ("/Laser_map", 100000);
     ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry> 
             ("/Odometry", 100000);
-    ros::Publisher pubCustomOdomAftMapped = nh.advertise<fast_lio_modified::CustomOdometry> 
-            ("/Custom_Odometry", 100000);
+    ros::Publisher pubEstimate = nh.advertise<fast_lio_modified::Estimate> 
+            ("/Estimate", 100000);
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 100000);
 //------------------------------------------------------------------------------------------------------
@@ -924,7 +906,7 @@ int main(int argc, char** argv)
                 p_imu->first_lidar_time = first_lidar_time;
                 flg_first_scan = false;
                 ROS_WARN("First Scan, skip this scan!\n");
-                publish_custom_odometry(pubCustomOdomAftMapped);
+                publish_estimate(pubEstimate);
                 continue;
             }
 
@@ -944,7 +926,7 @@ int main(int argc, char** argv)
             if (feats_undistort->empty() || (feats_undistort == NULL))
             {
                 ROS_WARN("1 : No point, skip this scan!\n");
-                publish_custom_odometry(pubCustomOdomAftMapped);
+                publish_estimate(pubEstimate);
                 continue;
             }
 
@@ -972,7 +954,7 @@ int main(int argc, char** argv)
                     ikdtree.Build(feats_down_world->points);
                 }
                 ROS_WARN("IKD-Tree Init, skip this scan!\n");
-                publish_custom_odometry(pubCustomOdomAftMapped);
+                publish_estimate(pubEstimate);
                 continue;
             }
             int featsFromMapNum = ikdtree.validnum();
@@ -984,7 +966,7 @@ int main(int argc, char** argv)
             if (feats_down_size < 5)
             {
                 ROS_WARN("2 : No point, skip this scan!\n");
-                publish_custom_odometry(pubCustomOdomAftMapped);
+                publish_estimate(pubEstimate);
                 continue;
             }
             
@@ -1025,7 +1007,7 @@ int main(int argc, char** argv)
             double t_update_end = omp_get_wtime();
 
             /******* Publish odometry *******/
-            publish_custom_odometry(pubCustomOdomAftMapped);
+            publish_estimate(pubEstimate);
             publish_odometry(pubOdomAftMapped);
 
             /*** add the feature points to map kdtree ***/

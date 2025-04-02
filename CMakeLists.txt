@@ -72,7 +72,8 @@ include_directories(
 add_message_files(
   FILES
   Pose6D.msg
-  CustomOdometry.msg
+  Estimate.msg
+  State.msg
 )
 
 generate_messages(
